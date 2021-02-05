@@ -1,0 +1,20 @@
+[package]
+name = "vdso-time"
+version = "0.1.0"
+authors = ["Shuocheng Wang <shuocheng.wsc@antgroup.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+std = ["libc"]
+sgx_std = ["sgx_tstd"]
+
+[dependencies]
+atomic = "0.5"
+sgx_tstd = { path = "incubator-teaclave-sgx-sdk/sgx_tstd", features = ["backtrace"], optional = true }
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+libc = "0.2"
