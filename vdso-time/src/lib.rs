@@ -10,12 +10,15 @@ extern crate sgx_tstd as std;
 #[cfg(feature = "sgx")]
 extern crate sgx_libc as libc;
 
-use std::sync::atomic::{self, AtomicU32, Ordering};
-
 mod sys;
-use sys::*;
 
-pub use sys::{ClockID, Timespec, Timeval, Timezone};
+pub use libc::{
+    clockid_t, time_t, timespec, timeval, CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_COARSE,
+    CLOCK_MONOTONIC_RAW, CLOCK_REALTIME, CLOCK_REALTIME_COARSE,
+};
+use std::sync::atomic::{self, Ordering};
+pub use sys::timezone;
+use sys::*;
 
 pub struct Vdso {
     vdso_data_ptr: VdsoDataPtr,
@@ -29,13 +32,11 @@ impl Vdso {
             const AT_SYSINFO_EHDR: u64 = 33;
             let vdso_addr = unsafe { libc::getauxval(AT_SYSINFO_EHDR) };
 
-            let mut tp = libc::timespec {
+            let mut tp = timespec {
                 tv_sec: 0,
                 tv_nsec: 0,
             };
-            let ret = unsafe {
-                libc::clock_getres(ClockID::CLOCK_REALTIME_COARSE as _, &mut tp as *mut _)
-            };
+            let ret = unsafe { libc::clock_getres(CLOCK_REALTIME_COARSE, &mut tp as *mut _) };
             let coarse_resolution = if ret == 0 { Some(tp.tv_nsec) } else { None };
 
             let mut utsname: libc::utsname = unsafe { std::mem::zeroed() };
@@ -126,10 +127,10 @@ impl Vdso {
     }
 
     // Linux time(): time_t time(time_t *tloc);
-    pub fn time(&self, tloc: *mut i64) -> Result<i64, ()> {
+    pub fn time(&self, tloc: *mut time_t) -> Result<time_t, ()> {
         let vdso_data = self.vdso_data(ClockSource::CS_HRES_COARSE);
-        let timestamp = vdso_data.vdso_timestamp(ClockID::CLOCK_REALTIME);
-        let t: i64 = timestamp.sec as _;
+        let timestamp = vdso_data.vdso_timestamp(CLOCK_REALTIME);
+        let t: time_t = timestamp.sec as _;
         if !tloc.is_null() {
             unsafe {
                 *tloc = t;
@@ -139,14 +140,13 @@ impl Vdso {
     }
 
     // Linux gettimeofday(): int gettimeofday(struct timeval *tv, struct timezone *tz);
-    pub fn gettimeofday(&self, tv: *mut Timeval, tz: *mut Timezone) -> Result<i32, ()> {
+    pub fn gettimeofday(&self, tv: *mut timeval, tz: *mut timezone) -> Result<i32, ()> {
         if !tv.is_null() {
-            let mut tp = Timespec::default();
-            self.do_hres(
-                ClockSource::CS_HRES_COARSE,
-                ClockID::CLOCK_REALTIME,
-                &mut tp,
-            )?;
+            let mut tp = timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            self.do_hres(ClockSource::CS_HRES_COARSE, CLOCK_REALTIME, &mut tp)?;
             unsafe {
                 (*tv).tv_sec = tp.tv_sec;
                 (*tv).tv_usec = tp.tv_nsec / NSEC_PER_USEC as i64;
@@ -165,40 +165,40 @@ impl Vdso {
     }
 
     // Linux clock_gettime(): int clock_gettime(clockid_t clockid, struct timespec *tp);
-    pub fn clock_gettime(&self, clockid: ClockID, tp: &mut Timespec) -> Result<i32, ()> {
+    pub fn clock_gettime(&self, clockid: clockid_t, tp: *mut timespec) -> Result<i32, ()> {
         match clockid {
-            ClockID::CLOCK_REALTIME | ClockID::CLOCK_MONOTONIC | ClockID::CLOCK_BOOTTIME => {
+            CLOCK_REALTIME | CLOCK_MONOTONIC | CLOCK_BOOTTIME => {
                 self.do_hres(ClockSource::CS_HRES_COARSE, clockid, tp)
             }
-            ClockID::CLOCK_MONOTONIC_RAW => self.do_hres(ClockSource::CS_RAW, clockid, tp),
-            ClockID::CLOCK_REALTIME_COARSE | ClockID::CLOCK_MONOTONIC_COARSE => {
+            CLOCK_MONOTONIC_RAW => self.do_hres(ClockSource::CS_RAW, clockid, tp),
+            CLOCK_REALTIME_COARSE | CLOCK_MONOTONIC_COARSE => {
                 self.do_coarse(ClockSource::CS_HRES_COARSE, clockid, tp)
             }
-            ClockID::CLOCK_PROCESS_CPUTIME_ID | ClockID::CLOCK_THREAD_CPUTIME_ID => Err(()),
+            _ => Err(()),
         }
     }
 
     // Linux clock_getres(): int clock_getres(clockid_t clockid, struct timespec *res);
-    pub fn clock_getres(&self, clockid: ClockID, res: &mut Timespec) -> Result<i32, ()> {
+    pub fn clock_getres(&self, clockid: clockid_t, res: *mut timespec) -> Result<i32, ()> {
         let ns = match clockid {
-            ClockID::CLOCK_REALTIME
-            | ClockID::CLOCK_MONOTONIC
-            | ClockID::CLOCK_BOOTTIME
-            | ClockID::CLOCK_MONOTONIC_RAW => {
+            CLOCK_REALTIME | CLOCK_MONOTONIC | CLOCK_BOOTTIME | CLOCK_MONOTONIC_RAW => {
                 let vdso_data = self.vdso_data(ClockSource::CS_HRES_COARSE);
                 vdso_data.hrtimer_res() as i64
             }
-            ClockID::CLOCK_REALTIME_COARSE | ClockID::CLOCK_MONOTONIC_COARSE => {
+            CLOCK_REALTIME_COARSE | CLOCK_MONOTONIC_COARSE => {
                 if self.coarse_resolution.is_none() {
                     return Err(());
                 }
                 self.coarse_resolution.unwrap()
             }
-            ClockID::CLOCK_PROCESS_CPUTIME_ID | ClockID::CLOCK_THREAD_CPUTIME_ID => return Err(()),
+            _ => return Err(()),
         };
 
-        res.tv_sec = 0;
-        res.tv_nsec = ns;
+        unsafe {
+            (*res).tv_sec = 0;
+            (*res).tv_nsec = ns;
+        }
+
         Ok(0)
     }
 
@@ -209,7 +209,7 @@ impl Vdso {
         }
     }
 
-    fn do_hres(&self, cs: ClockSource, clockid: ClockID, tp: &mut Timespec) -> Result<i32, ()> {
+    fn do_hres(&self, cs: ClockSource, clockid: clockid_t, tp: *mut timespec) -> Result<i32, ()> {
         let vdso_data = self.vdso_data(cs);
         let timestamp = vdso_data.vdso_timestamp(clockid);
         loop {
@@ -242,15 +242,17 @@ impl Vdso {
             ns = ns >> vdso_data.shift();
 
             if !Self::vdso_read_retry(vdso_data, seq) {
-                tp.tv_sec = (sec + ns / NSEC_PER_SEC) as i64;
-                tp.tv_nsec = (ns % NSEC_PER_SEC) as i64;
+                unsafe {
+                    (*tp).tv_sec = (sec + ns / NSEC_PER_SEC) as i64;
+                    (*tp).tv_nsec = (ns % NSEC_PER_SEC) as i64;
+                }
                 break;
             }
         }
         Ok(0)
     }
 
-    fn do_coarse(&self, cs: ClockSource, clockid: ClockID, tp: &mut Timespec) -> Result<i32, ()> {
+    fn do_coarse(&self, cs: ClockSource, clockid: clockid_t, tp: *mut timespec) -> Result<i32, ()> {
         let vdso_data = self.vdso_data(cs);
         let timestamp = vdso_data.vdso_timestamp(clockid);
         loop {
@@ -258,8 +260,10 @@ impl Vdso {
 
             atomic::fence(Ordering::Acquire);
 
-            tp.tv_sec = timestamp.sec as i64;
-            tp.tv_nsec = timestamp.nsec as i64;
+            unsafe {
+                (*tp).tv_sec = timestamp.sec as i64;
+                (*tp).tv_nsec = timestamp.nsec as i64;
+            }
 
             if !Self::vdso_read_retry(vdso_data, seq) {
                 break;
@@ -283,16 +287,17 @@ mod tests {
 
     const LOOPS: usize = 3;
     const SLEEP_DURATION: u64 = 10;
-    const USEC_PER_SEC: u64 = 1000000;
     const MAX_DIFF_NSEC: u64 = 2000;
+    const USEC_PER_SEC: u64 = 1000000;
 
     #[test]
     fn test_time() {
         let vdso = Vdso::new().unwrap();
         for _ in 0..LOOPS {
-            let mut vdso_tloc: i64 = 0;
+            let mut vdso_tloc: time_t = 0;
+            let mut libc_tloc: time_t = 0;
             let vdso_time = vdso.time(&mut vdso_tloc as *mut _).unwrap();
-            let libc_time = unsafe { libc::time(std::ptr::null_mut()) };
+            let libc_time = unsafe { libc::time(&mut libc_tloc as *mut _) };
             println!(
                 "[time()] vdso: {}, libc: {}, diff: {}",
                 vdso_time,
@@ -309,19 +314,22 @@ mod tests {
 
     #[test]
     fn test_clock_gettime() {
-        test_single_clock_gettime(ClockID::CLOCK_REALTIME_COARSE);
-        test_single_clock_gettime(ClockID::CLOCK_MONOTONIC_COARSE);
-        test_single_clock_gettime(ClockID::CLOCK_REALTIME);
-        test_single_clock_gettime(ClockID::CLOCK_MONOTONIC);
-        test_single_clock_gettime(ClockID::CLOCK_BOOTTIME);
-        test_single_clock_gettime(ClockID::CLOCK_MONOTONIC_RAW);
+        test_single_clock_gettime(CLOCK_REALTIME_COARSE);
+        test_single_clock_gettime(CLOCK_MONOTONIC_COARSE);
+        test_single_clock_gettime(CLOCK_REALTIME);
+        test_single_clock_gettime(CLOCK_MONOTONIC);
+        test_single_clock_gettime(CLOCK_BOOTTIME);
+        test_single_clock_gettime(CLOCK_MONOTONIC_RAW);
     }
 
-    fn test_single_clock_gettime(clockid: ClockID) {
+    fn test_single_clock_gettime(clockid: clockid_t) {
         let vdso = Vdso::new().unwrap();
         for _ in 0..LOOPS {
-            let mut vdso_tp = Timespec::default();
-            let mut libc_tp = libc::timespec {
+            let mut vdso_tp = timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            let mut libc_tp = timespec {
                 tv_sec: 0,
                 tv_nsec: 0,
             };
@@ -348,13 +356,16 @@ mod tests {
     fn test_gettimeofday() {
         let vdso = Vdso::new().unwrap();
         for _ in 0..LOOPS {
-            let mut vdso_tv = Timeval::default();
-            let mut vdso_tz = Timezone::default();
-            let mut libc_tv = libc::timeval {
+            let mut vdso_tv = timeval {
                 tv_sec: 0,
                 tv_usec: 0,
             };
-            let mut libc_tz = Timezone::default();
+            let mut vdso_tz = timezone::default();
+            let mut libc_tv = timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            };
+            let mut libc_tz = timezone::default();
 
             vdso.gettimeofday(&mut vdso_tv as *mut _, &mut vdso_tz as *mut _)
                 .unwrap();
@@ -362,7 +373,7 @@ mod tests {
             unsafe {
                 libc::gettimeofday(
                     &mut libc_tv as *mut _,
-                    &mut libc_tz as *mut Timezone as *mut _,
+                    &mut libc_tz as *mut timezone as *mut _,
                 )
             };
 
@@ -384,19 +395,22 @@ mod tests {
 
     #[test]
     fn test_clock_getres() {
-        test_single_clock_getres(ClockID::CLOCK_REALTIME_COARSE);
-        test_single_clock_getres(ClockID::CLOCK_MONOTONIC_COARSE);
-        test_single_clock_getres(ClockID::CLOCK_REALTIME);
-        test_single_clock_getres(ClockID::CLOCK_MONOTONIC);
-        test_single_clock_getres(ClockID::CLOCK_BOOTTIME);
-        test_single_clock_getres(ClockID::CLOCK_MONOTONIC_RAW);
+        test_single_clock_getres(CLOCK_REALTIME_COARSE);
+        test_single_clock_getres(CLOCK_MONOTONIC_COARSE);
+        test_single_clock_getres(CLOCK_REALTIME);
+        test_single_clock_getres(CLOCK_MONOTONIC);
+        test_single_clock_getres(CLOCK_BOOTTIME);
+        test_single_clock_getres(CLOCK_MONOTONIC_RAW);
     }
 
-    fn test_single_clock_getres(clockid: ClockID) {
+    fn test_single_clock_getres(clockid: clockid_t) {
         let vdso = Vdso::new().unwrap();
         for _ in 0..LOOPS {
-            let mut vdso_tp = Timespec::default();
-            let mut libc_tp = libc::timespec {
+            let mut vdso_tp = timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            let mut libc_tp = timespec {
                 tv_sec: 0,
                 tv_nsec: 0,
             };

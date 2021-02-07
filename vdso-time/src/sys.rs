@@ -1,4 +1,5 @@
-use super::*;
+use libc::clockid_t;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 pub const PAGE_SIZE: u64 = 4096;
 
@@ -17,66 +18,16 @@ pub enum ClockSource {
     CS_RAW = 1,
 }
 
-#[allow(non_camel_case_types)]
-pub type time_t = i64;
-#[allow(non_camel_case_types)]
-pub type suseconds_t = i64;
-#[allow(non_camel_case_types)]
-pub type clockid_t = i32;
-
 #[derive(Debug, Copy, Clone)]
 #[allow(non_camel_case_types)]
 pub enum vdso_clock_mode {
     VDSO_CLOCKMODE_NONE = 0,
 }
 
-#[derive(Debug, Copy, Clone)]
-#[allow(non_camel_case_types)]
-pub enum ClockID {
-    CLOCK_REALTIME = 0,
-    CLOCK_MONOTONIC = 1,
-    CLOCK_PROCESS_CPUTIME_ID = 2,
-    CLOCK_THREAD_CPUTIME_ID = 3,
-    CLOCK_MONOTONIC_RAW = 4,
-    CLOCK_REALTIME_COARSE = 5,
-    CLOCK_MONOTONIC_COARSE = 6,
-    CLOCK_BOOTTIME = 7,
-}
-
-impl ClockID {
-    #[deny(unreachable_patterns)]
-    pub fn from_raw(clockid: clockid_t) -> Result<ClockID, ()> {
-        Ok(match clockid as i32 {
-            0 => ClockID::CLOCK_REALTIME,
-            1 => ClockID::CLOCK_MONOTONIC,
-            2 => ClockID::CLOCK_PROCESS_CPUTIME_ID,
-            3 => ClockID::CLOCK_THREAD_CPUTIME_ID,
-            4 => ClockID::CLOCK_MONOTONIC_RAW,
-            5 => ClockID::CLOCK_REALTIME_COARSE,
-            6 => ClockID::CLOCK_MONOTONIC_COARSE,
-            7 => ClockID::CLOCK_BOOTTIME,
-            _ => return Err(()),
-        })
-    }
-}
-
+// libc::timezone is enum {}, need re-define timezone
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct Timespec {
-    pub tv_sec: time_t, /* seconds */
-    pub tv_nsec: i64,   /* nanoseconds */
-}
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct Timeval {
-    pub tv_sec: time_t,       /* seconds */
-    pub tv_usec: suseconds_t, /* microseconds */
-}
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct Timezone {
+pub struct timezone {
     pub tz_minuteswest: i32, /* Minutes west of GMT.  */
     pub tz_dsttime: i32,     /* Nonzero if DST is ever in effect.  */
 }
@@ -100,7 +51,7 @@ pub struct timens_offset {
 }
 
 pub trait VdsoData {
-    fn vdso_timestamp(&self, clockid: ClockID) -> &vdso_timestamp;
+    fn vdso_timestamp(&self, clockid: clockid_t) -> &vdso_timestamp;
     fn seq(&self) -> u32;
     fn clock_mode(&self) -> i32;
     fn cycle_last(&self) -> u64;
@@ -126,7 +77,7 @@ pub struct vdso_data_v5_9 {
     pub mult: u32,
     pub shift: u32,
 
-    pub union_1: vdso_data_union_1,
+    pub union_1: vdso_data_v5_9_union_1,
 
     pub tz_minuteswest: i32,
     pub tz_dsttime: i32,
@@ -138,7 +89,7 @@ pub struct vdso_data_v5_9 {
 
 impl VdsoData for vdso_data_v5_9 {
     #[inline]
-    fn vdso_timestamp(&self, clockid: ClockID) -> &vdso_timestamp {
+    fn vdso_timestamp(&self, clockid: clockid_t) -> &vdso_timestamp {
         unsafe { &self.union_1.basetime[clockid as usize] }
     }
 
@@ -190,7 +141,7 @@ impl VdsoData for vdso_data_v5_9 {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub union vdso_data_union_1 {
+pub union vdso_data_v5_9_union_1 {
     pub basetime: [vdso_timestamp; VDSO_BASES],
     pub offset: [timens_offset; VDSO_BASES],
 }
