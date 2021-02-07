@@ -1,21 +1,6 @@
 # vdso-time
 A rust crate for getting time using vDSO. This crate can support host (std or no_std) and SGX (based on Rust-SGX-SDK).
 
-## Quick Start
-```
-// clone vdso-time repo.
-cd vdso-time/third_parties
-git clone https://github.com/apache/incubator-teaclave-sgx-sdk.git
-cd incubator-teaclave-sgx-sdk
-git checkout d94996
-
-// test
-cd ../../vdso-time
-cargo t --release --tests
-cargo run --example example
-cd examples/sgx && make && cd bin && ./app
-```
-
 ## Getting Started
 Add the following dependency to your Cargo manifest:
 

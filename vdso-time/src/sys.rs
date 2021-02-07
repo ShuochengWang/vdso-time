@@ -5,10 +5,7 @@ pub const PAGE_SIZE: u64 = 4096;
 pub const CLOCK_TAI: usize = 11;
 pub const VDSO_BASES: usize = CLOCK_TAI + 1;
 
-// pub const MSEC_PER_SEC: u64 = 1000;
-// pub const USEC_PER_MSEC: u64 = 1000;
 pub const NSEC_PER_USEC: u64 = 1000;
-pub const USEC_PER_SEC: u64 = 1000000;
 pub const NSEC_PER_SEC: u64 = 1000000000;
 
 /// The timers is divided in 3 sets (HRES, COARSE, RAW),
@@ -24,10 +21,14 @@ pub enum ClockSource {
 pub type time_t = i64;
 #[allow(non_camel_case_types)]
 pub type suseconds_t = i64;
-// #[allow(non_camel_case_types)]
-// pub type clock_t = i64;
 #[allow(non_camel_case_types)]
 pub type clockid_t = i32;
+
+#[derive(Debug, Copy, Clone)]
+#[allow(non_camel_case_types)]
+pub enum vdso_clock_mode {
+    VDSO_CLOCKMODE_NONE = 0,
+}
 
 #[derive(Debug, Copy, Clone)]
 #[allow(non_camel_case_types)]
@@ -59,29 +60,23 @@ impl ClockID {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-#[allow(non_camel_case_types)]
-pub enum vdso_clock_mode {
-    VDSO_CLOCKMODE_NONE = 0,
-}
-
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct timespec {
+pub struct Timespec {
     pub tv_sec: time_t, /* seconds */
     pub tv_nsec: i64,   /* nanoseconds */
 }
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct timeval {
+pub struct Timeval {
     pub tv_sec: time_t,       /* seconds */
     pub tv_usec: suseconds_t, /* microseconds */
 }
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct timezone {
+pub struct Timezone {
     pub tz_minuteswest: i32, /* Minutes west of GMT.  */
     pub tz_dsttime: i32,     /* Nonzero if DST is ever in effect.  */
 }
@@ -115,6 +110,10 @@ pub trait VdsoData {
     fn tz_minuteswest(&self) -> i32;
     fn tz_dsttime(&self) -> i32;
     fn hrtimer_res(&self) -> u32;
+}
+
+pub enum VdsoDataPtr {
+    V5_9(*const vdso_data_v5_9),
 }
 
 #[repr(C)]

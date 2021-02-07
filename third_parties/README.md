@@ -1,0 +1,1 @@
+clone incubator-teaclave-sgx-sdk repo here and checkout incubator-teaclave-sgx-sdk to ```d94996``` commit.
