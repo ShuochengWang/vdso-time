@@ -1,7 +1,7 @@
 fn example() {
     use vdso_time::{ClockID, Timespec, Timeval, Timezone, Vdso};
 
-    let vdso = Vdso::new_with_std().unwrap();
+    let vdso = Vdso::new().unwrap();
 
     let mut tloc: i64 = 0;
     let time = vdso.time(&mut tloc as *mut _).unwrap();

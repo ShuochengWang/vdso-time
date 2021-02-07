@@ -1,4 +1,4 @@
-#![cfg_attr(any(not(feature = "std"), feature = "sgx"), no_std)]
+#![cfg_attr(feature = "sgx", no_std)]
 #![feature(asm)]
 #![feature(llvm_asm)]
 
@@ -10,7 +10,7 @@ extern crate sgx_tstd as std;
 #[cfg(feature = "sgx")]
 extern crate sgx_libc as libc;
 
-use atomic::{self, Atomic, Ordering};
+use std::sync::atomic::{self, AtomicU32, Ordering};
 
 mod sys;
 use sys::*;
@@ -23,31 +23,7 @@ pub struct Vdso {
 }
 
 impl Vdso {
-    pub fn new(
-        vdso_addr: u64,
-        coarse_resolution: Option<i64>,
-        kernel_version: (u8, u8),
-    ) -> Result<Self, ()> {
-        if vdso_addr == 0 {
-            return Err(());
-        }
-
-        let vdso_data_ptr = match kernel_version {
-            (5, 9) => {
-                let vdso_data_addr = vdso_addr - 4 * PAGE_SIZE + 128;
-                VdsoDataPtr::V5_9(vdso_data_addr as *const vdso_data_v5_9)
-            }
-            (_, _) => return Err(()),
-        };
-
-        Ok(Self {
-            coarse_resolution,
-            vdso_data_ptr,
-        })
-    }
-
-    #[cfg(any(test, feature = "std", feature = "sgx"))]
-    pub fn new_with_std() -> Result<Self, ()> {
+    pub fn new() -> Result<Self, ()> {
         #[cfg(not(feature = "sgx"))]
         let (vdso_addr, coarse_resolution, release) = {
             const AT_SYSINFO_EHDR: u64 = 33;
@@ -132,7 +108,21 @@ impl Vdso {
             return Err(());
         };
 
-        Self::new(vdso_addr, coarse_resolution, kernel_version)
+        if vdso_addr == 0 {
+            return Err(());
+        }
+        let vdso_data_ptr = match kernel_version {
+            (5, 9) => {
+                let vdso_data_addr = vdso_addr - 4 * PAGE_SIZE + 128;
+                VdsoDataPtr::V5_9(vdso_data_addr as *const vdso_data_v5_9)
+            }
+            (_, _) => return Err(()),
+        };
+
+        Ok(Self {
+            vdso_data_ptr,
+            coarse_resolution,
+        })
     }
 
     // Linux time(): time_t time(time_t *tloc);
@@ -298,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_time() {
-        let vdso = Vdso::new_with_std().unwrap();
+        let vdso = Vdso::new().unwrap();
         for _ in 0..LOOPS {
             let mut vdso_tloc: i64 = 0;
             let vdso_time = vdso.time(&mut vdso_tloc as *mut _).unwrap();
@@ -328,7 +318,7 @@ mod tests {
     }
 
     fn test_single_clock_gettime(clockid: ClockID) {
-        let vdso = Vdso::new_with_std().unwrap();
+        let vdso = Vdso::new().unwrap();
         for _ in 0..LOOPS {
             let mut vdso_tp = Timespec::default();
             let mut libc_tp = libc::timespec {
@@ -356,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_gettimeofday() {
-        let vdso = Vdso::new_with_std().unwrap();
+        let vdso = Vdso::new().unwrap();
         for _ in 0..LOOPS {
             let mut vdso_tv = Timeval::default();
             let mut vdso_tz = Timezone::default();
@@ -403,7 +393,7 @@ mod tests {
     }
 
     fn test_single_clock_getres(clockid: ClockID) {
-        let vdso = Vdso::new_with_std().unwrap();
+        let vdso = Vdso::new().unwrap();
         for _ in 0..LOOPS {
             let mut vdso_tp = Timespec::default();
             let mut libc_tp = libc::timespec {

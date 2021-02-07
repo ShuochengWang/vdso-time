@@ -23,8 +23,6 @@ Add the following dependency to your Cargo manifest:
 vdso-time = { path = "yourpath/vdso-time" }
 ```
 
-If you want ```no_std```, just set ```default-features = false```.
-
 If you want to use in SGX environment, add the following dependency to your Cargo manifest:
 
 ```

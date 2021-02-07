@@ -118,7 +118,7 @@ pub enum VdsoDataPtr {
 
 #[repr(C)]
 pub struct vdso_data_v5_9 {
-    pub seq: Atomic<u32>,
+    pub seq: AtomicU32,
 
     pub clock_mode: i32,
     pub cycle_last: u64,
